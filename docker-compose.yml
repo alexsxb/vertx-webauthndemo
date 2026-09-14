@@ -26,5 +26,31 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
       ME_CONFIG_BASICAUTH: "false"
 
+  # Production-artiger Smoketest des ganzen Stacks in Containern (nicht für den
+  # KeePassXC/Passkey-Dev-Workflow gedacht - dafür weiterhin `npm run dev`
+  # nutzen, das läuft über HTTPS, siehe README).
+  backend:
+    build: ./backend
+    container_name: webauthn-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      RP_ID: localhost
+      FRONTEND_ORIGIN: http://localhost:8082
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    container_name: webauthn-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8082:80"
+
 volumes:
   mongo-data:

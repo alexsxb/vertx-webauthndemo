@@ -73,6 +73,39 @@ läuft der Dev-Server jetzt über HTTPS.
 3. `POST /api/webauthn/login/verify` → `authenticate()` prüft die Assertion,
    `MongoCredentialStorage.updateCounter()` aktualisiert den Replay-Counter
 
+## Containerisiert: kompletter Stack via docker-compose
+
+`backend` und `frontend` haben je ein Multi-Stage-`Dockerfile`
+(Backend: Maven-Build → `azul/zulu-openjdk-alpine` JRE-Runtime; Frontend:
+`npm run build` → nginx-Alpine, das `/api/*` intern an `backend:8080`
+weiterleitet, sodass im Container-Stack **kein CORS** nötig ist).
+
+```bash
+docker compose up -d --build backend frontend
+```
+
+Danach: `http://localhost:8082`. **Wichtig:** Dieser Stack läuft bewusst
+über HTTP und ist als Smoketest ("baut/startet alles zusammen") gedacht –
+für den KeePassXC-Passkey-Workflow lokal weiterhin `npm run dev` (HTTPS,
+siehe oben) verwenden, nicht diesen Compose-Stack. Backend/Frontend
+belegen dabei dieselben Ports (8080/5173 vs. 8082) wie der native
+Dev-Workflow – nicht gleichzeitig beide Wege laufen lassen.
+
+## CI: Docker-Images bauen (GitHub Actions + Gitea Actions)
+
+`.github/workflows/docker-build.yml` und `.gitea/workflows/docker-build.yml`
+bauen bei jedem Push je ein Image für `backend/` und `frontend/`
+(Gitea-Actions-Syntax ist absichtlich GitHub-Actions-kompatibel, daher fast
+identischer Inhalt):
+
+- **GitHub:** pusht nach `ghcr.io/<owner>/<repo>-{backend,frontend}` via
+  dem automatischen `GITHUB_TOKEN` – funktioniert ohne weitere Konfiguration.
+- **Gitea:** pusht nur, wenn die Repo-Variable `GITEA_REGISTRY`
+  (z.B. `gitea.example.com`) und das Secret `REGISTRY_TOKEN`
+  (Access-Token mit `write:package`) gesetzt sind. Ohne die beiden wird nur
+  gebaut (Validierung), nicht gepusht – der Workflow läuft also bereits
+  direkt nach der Migration, auch bevor die Registry eingerichtet ist.
+
 ## Wichtige Hinweise / was du noch prüfen solltest
 
 - **`ResidentKey.REQUIRED`** ist in `MainVerticle` gesetzt, damit wirklich
