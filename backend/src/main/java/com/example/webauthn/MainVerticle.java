@@ -148,11 +148,19 @@ public class MainVerticle extends AbstractVerticle {
 
     JsonObject rawResponse = ctx.body().asJsonObject();
 
+    // FRONTEND_ORIGIN kann kommagetrennt mehrere erlaubte Origins enthalten (CORS) -
+    // für die WebAuthn-Verifikation zählt aber nur der tatsächlich vom Browser
+    // genutzte Origin aus dem Request-Header, nicht die ganze Liste.
+    String requestOrigin = ctx.request().getHeader("Origin");
+    if (requestOrigin == null) {
+      requestOrigin = frontendOrigin.split(",")[0].trim();
+    }
+
     WebAuthn4JCredentials credentials = new WebAuthn4JCredentials()
       .setWebauthn(rawResponse)
       .setUsername(username)
       .setChallenge(challenge)
-      .setOrigin(frontendOrigin)
+      .setOrigin(requestOrigin)
       .setDomain(rpId);
 
     webAuthn4J.authenticate(credentials)
