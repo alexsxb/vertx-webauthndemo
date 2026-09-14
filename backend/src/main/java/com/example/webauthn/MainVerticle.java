@@ -193,6 +193,7 @@ public class MainVerticle extends AbstractVerticle {
 
   private void fail(RoutingContext ctx, Throwable err) {
     ctx.response().setStatusCode(400)
+      .putHeader("content-type", "application/json")
       .end(new JsonObject().put("error", err.getMessage() == null ? err.toString() : err.getMessage()).encode());
   }
 
