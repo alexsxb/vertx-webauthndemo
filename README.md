@@ -1,5 +1,20 @@
 # Passkey Demo: Vert.x 5.1.8 + WebAuthn4J + MongoDB + React
 
+> **Dieser Branch (`webauthn4j-handler`)** nutzt statt der manuellen
+> Low-Level-Routen den höherwertigen `WebAuthn4JHandler` (`vertx-web`), der
+> Register-/Login-Optionen und die Response-Verifikation automatisch
+> verdrahtet. Kompakterer Code, aber ein echter Trade-off:
+> `setOrigin()` akzeptiert nur **einen** Origin, nicht mehrere wie unser
+> `CorsHandler` – bei mehreren gültigen Frontend-Origins (siehe
+> `docker-compose.yml`) funktioniert die Passkey-Verifikation nur gegen den
+> zuerst konfigurierten. Attestation (Register) und Assertion (Login) laufen
+> außerdem über denselben Endpunkt (`POST /api/webauthn/response`) statt
+> getrennter `.../register/verify` / `.../login/verify` Routen, und `/api/me`
+> ist direkt über den Handler als `AuthenticationHandler` gesichert (401 ohne
+> gültige Session) statt über einen manuellen Session-Check.
+> Die manuelle Variante mit voller Kontrolle über Origin-Matching pro Request
+> bleibt auf `master`.
+
 Minimales, lauffähiges Beispiel für Passkey-Registrierung und -Login
 (Discoverable Credentials) mit:
 
@@ -130,16 +145,14 @@ identischer Inhalt):
   Username-less Login). Falls dein Test-Authenticator (z.B. ältere
   Hardware-Keys) das nicht unterstützt, schlägt die Registrierung fehl –
   dann testweise auf `ResidentKey.PREFERRED` umstellen.
-- Der Login-Status wird hier bewusst simpel über
-  `ctx.session().put("userId", ...)` verwaltet, nicht über Vert.x'
-  `AuthenticationHandler`-Kette – das hält das Beispiel überschaubar, ist
-  für Produktion aber ggf. zu erweitern (z.B. `SecurityAuditLogger`,
-  Rate-Limiting auf den `/options`-Endpunkten gegen Enumeration).
-- **Alternative:** Vert.x bietet mit `WebAuthn4JHandler` auch eine
-  höherwertige Handler-Variante, die drei Callback-Routen automatisch
-  verdrahtet. Dieses Beispiel nutzt bewusst die direkt dokumentierten
-  Low-Level-Methoden (`createCredentialsOptions`/`getCredentialsOptions`/
-  `authenticate`), um jeden Schritt transparent zu halten.
+- Der Login-Status läuft hier über Vert.x' `AuthenticationHandler`-Kette
+  (`WebAuthn4JHandler` als Route-Handler vor `/api/me`), nicht über einen
+  manuellen `ctx.session().put("userId", ...)`-Check wie auf `master` – das
+  ist der idiomatische Weg, hat aber wie oben beschrieben den Single-Origin-
+  Trade-off.
+- Rate-Limiting auf den `/options`-Endpunkten gegen Enumeration ist hier
+  (wie auf `master`) nicht implementiert – für echten Produktivbetrieb
+  ergänzen.
 - Vor Produktivbetrieb: MongoDB in Compose ohne Auth – für echten Einsatz
   unbedingt Zugangsdaten/TLS ergänzen, `signCount`-Anomalien behandeln
   (klonverdächtige Authenticatoren sperren) und Session-Cookies auf

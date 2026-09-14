@@ -32,9 +32,10 @@ export default function App() {
     try {
       const options = await api.registerOptions(email, displayName || email);
       const attResp = await startRegistration({ optionsJSON: options });
-      const result = await api.registerVerify(attResp);
+      // Response-Endpunkt liefert 204 ohne Body (WebAuthn4JHandler) -> Username kennen wir eh schon.
+      await api.registerVerify(attResp);
       setStatusType('success');
-      setStatus(`Passkey registriert für ${result.username}. Du kannst dich jetzt einloggen.`);
+      setStatus(`Passkey registriert für ${email}. Du kannst dich jetzt einloggen.`);
     } catch (err) {
       setStatusType('error');
       setStatus(`Fehler bei der Registrierung: ${err.message}`);
@@ -52,10 +53,13 @@ export default function App() {
     try {
       const options = await api.loginOptions(loginEmail || undefined);
       const authResp = await startAuthentication({ optionsJSON: options });
-      const result = await api.loginVerify(authResp);
+      // Response-Endpunkt liefert 204 ohne Body -> Username nach dem Login separat holen
+      // (bei Discoverable-Login kennen wir ihn vorher gar nicht).
+      await api.loginVerify(authResp);
+      const me = await api.me();
       setStatusType('success');
-      setStatus(`Eingeloggt als ${result.username}.`);
-      setUser({ username: result.username });
+      setStatus(`Eingeloggt als ${me.username}.`);
+      setUser(me);
     } catch (err) {
       setStatusType('error');
       setStatus(`Login fehlgeschlagen: ${err.message}`);

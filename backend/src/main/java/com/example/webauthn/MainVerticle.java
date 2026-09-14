@@ -1,7 +1,6 @@
 package com.example.webauthn;
 
 import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Future;
 import io.vertx.core.http.CookieSameSite;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.json.JsonObject;
@@ -12,10 +11,10 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.CorsHandler;
 import io.vertx.ext.web.handler.SessionHandler;
+import io.vertx.ext.web.handler.WebAuthn4JHandler;
 import io.vertx.ext.web.sstore.LocalSessionStore;
 
 import java.util.Set;
-import java.util.UUID;
 
 public class MainVerticle extends AbstractVerticle {
 
@@ -27,8 +26,6 @@ public class MainVerticle extends AbstractVerticle {
   private final String frontendOrigin = env("FRONTEND_ORIGIN", "https://localhost:5173");
   private final int port = Integer.parseInt(env("PORT", "8080"));
 
-  private WebAuthn4J webAuthn4J;
-
   @Override
   public void start(io.vertx.core.Promise<Void> startPromise) {
     MongoClient mongoClient = MongoClient.createShared(vertx, new JsonObject()
@@ -37,7 +34,7 @@ public class MainVerticle extends AbstractVerticle {
 
     MongoCredentialStorage storage = new MongoCredentialStorage(mongoClient);
 
-    webAuthn4J = WebAuthn4J.create(vertx, new WebAuthn4JOptions()
+    WebAuthn4J webAuthn4J = WebAuthn4J.create(vertx, new WebAuthn4JOptions()
         .setRelyingParty(new RelyingParty().setId(rpId).setName(rpName))
         // Discoverable Credential erzwingen -> Username-less Login möglich
         .setResidentKey(ResidentKey.REQUIRED)
@@ -46,8 +43,14 @@ public class MainVerticle extends AbstractVerticle {
 
     Router router = Router.router(vertx);
 
-    // FRONTEND_ORIGIN darf kommagetrennt mehrere Origins enthalten (z.B. der
-    // direkte HTTP-Smoketest-Port und der HTTPS-Port hinter Caddy).
+    // WebAuthn4JHandler.setOrigin() erwartet - anders als unser CorsHandler oben -
+    // GENAU EINEN Origin (keine kommagetrennte Liste). Läuft der Stack also über
+    // mehrere gültige Origins (z.B. HTTP-Smoketest + HTTPS via Caddy), kann nur
+    // der erste davon tatsächlich Passkeys registrieren/verifizieren. Das ist der
+    // Haupt-Trade-off gegenüber der manuellen Low-Level-Variante (siehe master),
+    // die dafür pro Request den tatsächlichen Origin-Header ausliest.
+    String primaryOrigin = frontendOrigin.split(",")[0].trim();
+
     CorsHandler cors = CorsHandler.create()
       .allowCredentials(true)
       .allowedMethods(Set.of(HttpMethod.GET, HttpMethod.POST, HttpMethod.OPTIONS))
@@ -63,12 +66,18 @@ public class MainVerticle extends AbstractVerticle {
         .setCookieSameSite(CookieSameSite.LAX));
       // Hinweis: Session-Cookies sind in Vert.x per default bereits HttpOnly (nicht konfigurierbar)
 
-    router.post("/api/webauthn/register/options").handler(this::registerOptions);
-    router.post("/api/webauthn/register/verify").handler(this::registerVerify);
-    router.post("/api/webauthn/login/options").handler(this::loginOptions);
-    router.post("/api/webauthn/login/verify").handler(this::loginVerify);
+    // Höherwertige Handler-Variante: verdrahtet Register-/Login-Optionen und die
+    // gemeinsame Response-Verifikation (Attestation UND Assertion laufen über
+    // dieselbe Route) automatisch, inkl. Challenge/User-Handling in der Session.
+    WebAuthn4JHandler webAuthnHandler = WebAuthn4JHandler.create(webAuthn4J)
+      .setOrigin(primaryOrigin)
+      .setupCredentialsCreateCallback(router.post("/api/webauthn/register/options"))
+      .setupCredentialsGetCallback(router.post("/api/webauthn/login/options"))
+      .setupCallback(router.post("/api/webauthn/response"));
 
-    router.get("/api/me").handler(this::me);
+    // Als AuthenticationHandler geeicht: prüft den (session-persistierten)
+    // angemeldeten User und liefert sonst automatisch 401.
+    router.get("/api/me").handler(webAuthnHandler).handler(this::me);
     router.post("/api/logout").handler(this::logout);
 
     vertx.createHttpServer()
@@ -81,109 +90,8 @@ public class MainVerticle extends AbstractVerticle {
       .onFailure(startPromise::fail);
   }
 
-  // --- Registrierung: Schritt 1 - Optionen für navigator.credentials.create() ---
-  private void registerOptions(RoutingContext ctx) {
-    JsonObject body = ctx.body().asJsonObject();
-    String email = body.getString("email");
-    String displayName = body.getString("displayName", email);
-
-    if (email == null || email.isBlank()) {
-      ctx.response().setStatusCode(400).end(new JsonObject().put("error", "email required").encode());
-      return;
-    }
-
-    JsonObject user = new JsonObject()
-      .put("name", email)
-      .put("displayName", displayName);
-
-    webAuthn4J.createCredentialsOptions(user)
-      .onSuccess(options -> {
-        // Challenge + Username für den Verify-Schritt in der Session merken.
-        // Niemals dem Client vertrauen, welche Challenge/User gerade "aktiv" ist.
-        ctx.session().put("webauthn.challenge", options.getString("challenge"));
-        ctx.session().put("webauthn.username", email);
-        ctx.json(options);
-      })
-      .onFailure(err -> fail(ctx, err));
-  }
-
-  // --- Registrierung: Schritt 2 - Attestation-Response verifizieren + speichern ---
-  private void registerVerify(RoutingContext ctx) {
-    verifyAndAuthenticate(ctx, false);
-  }
-
-  // --- Login: Schritt 1 - Optionen für navigator.credentials.get() ---
-  // Kein "email" im Body -> Discoverable-Credential-Flow (Username-less Login)
-  private void loginOptions(RoutingContext ctx) {
-    JsonObject body = ctx.body().asJsonObject() != null ? ctx.body().asJsonObject() : new JsonObject();
-    String email = body.getString("email");
-
-    webAuthn4J.getCredentialsOptions(email)
-      .onSuccess(options -> {
-        ctx.session().put("webauthn.challenge", options.getString("challenge"));
-        if (email != null) {
-          ctx.session().put("webauthn.username", email);
-        } else {
-          ctx.session().remove("webauthn.username");
-        }
-        ctx.json(options);
-      })
-      .onFailure(err -> fail(ctx, err));
-  }
-
-  // --- Login: Schritt 2 - Assertion-Response verifizieren ---
-  private void loginVerify(RoutingContext ctx) {
-    verifyAndAuthenticate(ctx, true);
-  }
-
-  private void verifyAndAuthenticate(RoutingContext ctx, boolean isLogin) {
-    String challenge = ctx.session().get("webauthn.challenge");
-    String username = ctx.session().get("webauthn.username"); // kann bei Discoverable-Login null sein
-
-    if (challenge == null) {
-      ctx.response().setStatusCode(400)
-        .end(new JsonObject().put("error", "no pending challenge in session").encode());
-      return;
-    }
-
-    JsonObject rawResponse = ctx.body().asJsonObject();
-
-    // FRONTEND_ORIGIN kann kommagetrennt mehrere erlaubte Origins enthalten (CORS) -
-    // für die WebAuthn-Verifikation zählt aber nur der tatsächlich vom Browser
-    // genutzte Origin aus dem Request-Header, nicht die ganze Liste.
-    String requestOrigin = ctx.request().getHeader("Origin");
-    if (requestOrigin == null) {
-      requestOrigin = frontendOrigin.split(",")[0].trim();
-    }
-
-    WebAuthn4JCredentials credentials = new WebAuthn4JCredentials()
-      .setWebauthn(rawResponse)
-      .setUsername(username)
-      .setChallenge(challenge)
-      .setOrigin(requestOrigin)
-      .setDomain(rpId);
-
-    webAuthn4J.authenticate(credentials)
-      .onSuccess(user -> {
-        ctx.session().remove("webauthn.challenge");
-        // Server-seitiger Login-Status
-        String resolvedUsername = user.principal().getString("username", username);
-        ctx.session().put("userId", resolvedUsername);
-        ctx.json(new JsonObject()
-          .put("status", "ok")
-          .put("username", resolvedUsername)
-          .put("mode", isLogin ? "login" : "register"));
-      })
-      .onFailure(err -> fail(ctx, err));
-  }
-
   private void me(RoutingContext ctx) {
-    String userId = ctx.session().get("userId");
-    if (userId == null) {
-      ctx.response().setStatusCode(401).end(new JsonObject().put("error", "not authenticated").encode());
-      return;
-    }
-    ctx.json(new JsonObject().put("username", userId));
+    ctx.json(new JsonObject().put("username", ctx.user().principal().getString("username")));
   }
 
   private void logout(RoutingContext ctx) {
@@ -191,19 +99,8 @@ public class MainVerticle extends AbstractVerticle {
     ctx.response().setStatusCode(204).end();
   }
 
-  private void fail(RoutingContext ctx, Throwable err) {
-    ctx.response().setStatusCode(400)
-      .putHeader("content-type", "application/json")
-      .end(new JsonObject().put("error", err.getMessage() == null ? err.toString() : err.getMessage()).encode());
-  }
-
   private static String env(String key, String fallback) {
     String v = System.getenv(key);
     return v == null || v.isBlank() ? fallback : v;
-  }
-
-  @SuppressWarnings("unused")
-  private static String newOpaqueId() {
-    return UUID.randomUUID().toString();
   }
 }

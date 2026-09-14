@@ -17,15 +17,17 @@ async function request(path, body) {
   return data;
 }
 
+// WebAuthn4JHandler (Vert.x) erwartet "name" statt "email" und verarbeitet
+// Attestation (Register) wie Assertion (Login) über denselben Response-Endpunkt.
 export const api = {
   registerOptions: (email, displayName) =>
-    request('/webauthn/register/options', { email, displayName }),
+    request('/webauthn/register/options', { name: email, displayName }),
   registerVerify: (attestationResponse) =>
-    request('/webauthn/register/verify', attestationResponse),
+    request('/webauthn/response', attestationResponse),
 
-  loginOptions: (email) => request('/webauthn/login/options', { email }),
+  loginOptions: (email) => request('/webauthn/login/options', { name: email }),
   loginVerify: (assertionResponse) =>
-    request('/webauthn/login/verify', assertionResponse),
+    request('/webauthn/response', assertionResponse),
 
   me: async () => {
     const res = await fetch(BASE + '/me', { credentials: 'include' });

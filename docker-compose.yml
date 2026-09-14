@@ -40,7 +40,10 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017
       RP_ID: localhost
-      FRONTEND_ORIGIN: http://localhost:8082,https://localhost:9443
+      # Auf diesem Branch (WebAuthn4JHandler) zählt für die eigentliche Passkey-
+      # Verifikation nur der ERSTE Origin (siehe MainVerticle) - deshalb hier
+      # https://localhost:9443 (Caddy/KeePassXC) zuerst, 8082 nur für CORS.
+      FRONTEND_ORIGIN: https://localhost:9443,http://localhost:8082
     ports:
       - "8080:8080"
 
