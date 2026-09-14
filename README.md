@@ -115,6 +115,19 @@ docker compose up -d --build backend frontend caddy
   beim ersten Aufruf einmalig akzeptieren (selbstsigniert, wie beim
   Vite-Dev-Server).
 
+### Ports im Compose-Stack
+
+| Port  | Service         | Zweck                                                        |
+|-------|-----------------|---------------------------------------------------------------|
+| 9443  | `caddy`         | HTTPS (TLS-terminiert) – Haupteinstieg, u.a. für KeePassXC     |
+| 8082  | `frontend`      | HTTP-Smoketest direkt auf nginx (ohne TLS)                     |
+| 8080  | `backend`       | Vert.x-Backend direkt (z.B. für API-Tests ohne Frontend-Proxy) |
+| 8081  | `mongo-express` | Web-UI zum Anschauen der gespeicherten Authenticator-Dokumente |
+| 27017 | `mongo`         | MongoDB (direkter Zugriff, z.B. via `mongosh`)                 |
+
+Für den reinen Passkey-Flow reichen `9443` (bzw. `8082`) – die übrigen Ports
+sind optional für Debugging/Inspektion.
+
 Caddy terminiert TLS und reicht alles an den `frontend`-Container weiter,
 der wie gehabt `/api/*` intern an `backend:8080` proxied – die Origin-Prüfung
 im Backend (`FRONTEND_ORIGIN`, kommagetrennt für mehrere erlaubte Origins)
