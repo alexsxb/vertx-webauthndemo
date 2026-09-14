@@ -26,9 +26,10 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
       ME_CONFIG_BASICAUTH: "false"
 
-  # Production-artiger Smoketest des ganzen Stacks in Containern (nicht für den
-  # KeePassXC/Passkey-Dev-Workflow gedacht - dafür weiterhin `npm run dev`
-  # nutzen, das läuft über HTTPS, siehe README).
+  # Production-artiger Stack in Containern. http://localhost:8082 ist ein
+  # reiner HTTP-Smoketest; für Passkeys/KeePassXC https://localhost:9443
+  # (über Caddy, siehe unten) nutzen. Zertifikate vorher einmalig erzeugen:
+  # ./certs/generate.sh
   backend:
     build: ./backend
     container_name: webauthn-backend
@@ -39,7 +40,7 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017
       RP_ID: localhost
-      FRONTEND_ORIGIN: http://localhost:8082
+      FRONTEND_ORIGIN: http://localhost:8082,https://localhost:9443
     ports:
       - "8080:8080"
 
@@ -51,6 +52,21 @@ services:
       - backend
     ports:
       - "8082:80"
+
+  # TLS-Terminierung vor dem Frontend, damit Passwortmanager-Erweiterungen wie
+  # KeePassXC-Browser (die nur auf https:// reagieren) auch gegen den
+  # Compose-Stack funktionieren - nicht nur gegen den Vite-Dev-Server.
+  caddy:
+    image: caddy:2-alpine
+    container_name: webauthn-caddy
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "9443:9443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
 
 volumes:
   mongo-data:

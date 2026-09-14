@@ -46,12 +46,16 @@ public class MainVerticle extends AbstractVerticle {
 
     Router router = Router.router(vertx);
 
-    router.route().handler(
-      CorsHandler.create()
-        .addOrigin(frontendOrigin)
-        .allowCredentials(true)
-        .allowedMethods(Set.of(HttpMethod.GET, HttpMethod.POST, HttpMethod.OPTIONS))
-        .allowedHeaders(Set.of("Content-Type")));
+    // FRONTEND_ORIGIN darf kommagetrennt mehrere Origins enthalten (z.B. der
+    // direkte HTTP-Smoketest-Port und der HTTPS-Port hinter Caddy).
+    CorsHandler cors = CorsHandler.create()
+      .allowCredentials(true)
+      .allowedMethods(Set.of(HttpMethod.GET, HttpMethod.POST, HttpMethod.OPTIONS))
+      .allowedHeaders(Set.of("Content-Type"));
+    for (String origin : frontendOrigin.split(",")) {
+      cors.addOrigin(origin.trim());
+    }
+    router.route().handler(cors);
 
     router.route().handler(BodyHandler.create());
     router.route().handler(

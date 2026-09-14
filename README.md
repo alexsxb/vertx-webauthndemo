@@ -80,16 +80,33 @@ läuft der Dev-Server jetzt über HTTPS.
 `npm run build` → nginx-Alpine, das `/api/*` intern an `backend:8080`
 weiterleitet, sodass im Container-Stack **kein CORS** nötig ist).
 
+Einmalig ein selbstsigniertes Dev-Zertifikat erzeugen (reines `openssl`,
+kein mkcert/Systeminstall nötig):
+
 ```bash
-docker compose up -d --build backend frontend
+./certs/generate.sh
 ```
 
-Danach: `http://localhost:8082`. **Wichtig:** Dieser Stack läuft bewusst
-über HTTP und ist als Smoketest ("baut/startet alles zusammen") gedacht –
-für den KeePassXC-Passkey-Workflow lokal weiterhin `npm run dev` (HTTPS,
-siehe oben) verwenden, nicht diesen Compose-Stack. Backend/Frontend
-belegen dabei dieselben Ports (8080/5173 vs. 8082) wie der native
-Dev-Workflow – nicht gleichzeitig beide Wege laufen lassen.
+Dann den Stack starten:
+
+```bash
+docker compose up -d --build backend frontend caddy
+```
+
+- `http://localhost:8082` – reiner HTTP-Smoketest (kein TLS, kein KeePassXC).
+- `https://localhost:9443` – über **Caddy** TLS-terminiert (nutzt das
+  Zertifikat aus `certs/`, per Bind-Mount reingereicht) → hier reagieren
+  Passwortmanager-Erweiterungen wie KeePassXC-Browser. Zertifikatswarnung
+  beim ersten Aufruf einmalig akzeptieren (selbstsigniert, wie beim
+  Vite-Dev-Server).
+
+Caddy terminiert TLS und reicht alles an den `frontend`-Container weiter,
+der wie gehabt `/api/*` intern an `backend:8080` proxied – die Origin-Prüfung
+im Backend (`FRONTEND_ORIGIN`, kommagetrennt für mehrere erlaubte Origins)
+lässt beide Wege (8082 und 9443) gleichzeitig zu.
+
+Der `npm run dev`-Workflow (Vite, ebenfalls HTTPS) bleibt unabhängig davon
+bestehen und ist der schnellere Loop für reine Frontend-Entwicklung.
 
 ## CI: Docker-Images bauen (GitHub Actions + Gitea Actions)
 

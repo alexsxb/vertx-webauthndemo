@@ -1,0 +1,8 @@
+{
+	auto_https off
+}
+
+localhost:9443 {
+	tls /certs/localhost.pem /certs/localhost-key.pem
+	reverse_proxy frontend:80
+}
