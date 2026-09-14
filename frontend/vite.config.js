@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import basicSsl from '@vitejs/plugin-basic-ssl';
+import tailwindcss from '@tailwindcss/vite';
 
 // https statt http: Erweiterungen wie KeePassXC-Browser klinken sich in
 // navigator.credentials nur auf https:// ein (localhost über http wird vom
@@ -8,7 +9,7 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 // Extensions aber nicht erkannt). basicSsl erzeugt dafür automatisch ein
 // selbstsigniertes Dev-Zertifikat, ganz ohne mkcert/Systeminstallation.
 export default defineConfig({
-  plugins: [react(), basicSsl()],
+  plugins: [react(), tailwindcss(), basicSsl()],
   server: {
     port: 5173,
     https: true,
